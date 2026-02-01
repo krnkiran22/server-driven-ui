@@ -19,7 +19,11 @@ export const Container = ({
 
   return (
     <div
-      ref={(ref) => ref && connect(drag(ref))}
+      ref={(ref: HTMLDivElement | null) => {
+        if (ref) {
+          connect(drag(ref));
+        }
+      }}
       style={{ backgroundColor, padding }}
       className="w-full"
     >
