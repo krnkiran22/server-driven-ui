@@ -54,7 +54,7 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen flex items-center justify-center bg-gray-100 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-900 mb-2">
@@ -100,8 +100,8 @@ export default function RegisterPage() {
                 placeholder="abc-college"
                 required
               />
-              <p className="text-xs text-gray-500 -mt-2">
-                Your website will be at: {formData.subdomain || 'your-subdomain'}.yourplatform.com
+              <p className="text-xs text-gray-700 bg-gray-50 p-2 rounded font-medium">
+                Your website will be at: <span className="text-blue-600 font-semibold">{formData.subdomain || 'your-subdomain'}.yourplatform.com</span>
               </p>
 
               <Input

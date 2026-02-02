@@ -3,7 +3,7 @@ import Button from '@/components/ui/Button';
 
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+    <div className="min-h-screen bg-linear-to-b from-blue-50 to-white">
       <nav className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <div className="text-2xl font-bold text-blue-600">
@@ -48,7 +48,7 @@ export default function HomePage() {
         <div className="mt-24 grid grid-cols-1 md:grid-cols-3 gap-8">
           <div className="bg-white p-8 rounded-lg shadow-md">
             <div className="text-4xl mb-4">🎨</div>
-            <h3 className="text-xl font-semibold mb-3">Drag & Drop Builder</h3>
+            <h3 className="text-xl font-semibold mb-3 text-gray-900">Drag & Drop Builder</h3>
             <p className="text-gray-600">
               Visually design your pages with our intuitive drag-and-drop interface.
               No coding skills needed.
@@ -57,7 +57,7 @@ export default function HomePage() {
 
           <div className="bg-white p-8 rounded-lg shadow-md">
             <div className="text-4xl mb-4">🤖</div>
-            <h3 className="text-xl font-semibold mb-3">AI-Powered</h3>
+            <h3 className="text-xl font-semibold mb-3 text-gray-900">AI-Powered</h3>
             <p className="text-gray-600">
               Use natural language commands to build pages. AI generates content and
               suggests improvements.
@@ -66,7 +66,7 @@ export default function HomePage() {
 
           <div className="bg-white p-8 rounded-lg shadow-md">
             <div className="text-4xl mb-4">⚡</div>
-            <h3 className="text-xl font-semibold mb-3">Server-Driven UI</h3>
+            <h3 className="text-xl font-semibold mb-3 text-gray-900">Server-Driven UI</h3>
             <p className="text-gray-600">
               Update your website instantly without redeployment. Changes go live
               immediately.
