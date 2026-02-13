@@ -39,3 +39,10 @@ export const duplicatePage = async (id: string, name: string, slug: string): Pro
   const response = await apiClient.post(`/pages/${id}/duplicate`, { name, slug });
   return response.data.data;
 };
+
+export const getPageBySlug = async (slug: string, institutionId: string): Promise<Page> => {
+  const response = await apiClient.get(`/pages/slug/${slug}`, {
+    headers: { 'x-institution-id': institutionId }
+  });
+  return response.data.data;
+};

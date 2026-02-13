@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { useNode } from '@craftjs/core';
 
 interface ContainerProps {
