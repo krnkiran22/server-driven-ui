@@ -8,9 +8,10 @@ import Button from '../ui/Button';
 interface EditorToolbarProps {
     onSave: () => void;
     isSaving?: boolean;
+    slug?: string;
 }
 
-export const EditorToolbar = ({ onSave, isSaving }: EditorToolbarProps) => {
+export const EditorToolbar = ({ onSave, isSaving, slug }: EditorToolbarProps) => {
     const { actions, query, enabled } = useEditor((state) => ({
         enabled: state.options.enabled,
     }));
@@ -38,6 +39,17 @@ export const EditorToolbar = ({ onSave, isSaving }: EditorToolbarProps) => {
             </div>
 
             <div className="flex items-center gap-2">
+                {slug && (
+                    <a
+                        href={`/${slug}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mr-4 text-xs font-bold text-gray-400 hover:text-blue-600 transition flex items-center gap-1"
+                    >
+                        View Live Website
+                        <Plus className="w-3 h-3 rotate-45" />
+                    </a>
+                )}
                 <Button
                     variant="secondary"
                     size="sm"

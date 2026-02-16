@@ -52,8 +52,15 @@ body {
 
 /* Animations */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .animate-fade-in {
@@ -66,4 +73,36 @@ body {
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+/* CraftJS Indicators */
+.craft-indicator {
+  position: absolute;
+  background: #2563eb;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.canvas-outline-active {
+  outline: 2px solid #2563eb !important;
+  outline-offset: -2px;
+}
+
+.component-selected {
+  outline: 2px solid #2563eb !important;
+  outline-offset: -2px;
+  position: relative;
+}
+
+.component-selected::after {
+  content: "Selected";
+  position: absolute;
+  top: -24px;
+  left: 0;
+  background: #2563eb;
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+  padding: 2px 6px;
+  border-radius: 4px 4px 0 0;
 }

@@ -25,7 +25,7 @@ export const PropertyPanel = () => {
 
     if (!selected) {
         return (
-            <div className="w-80 border-l bg-gray-50 h-[calc(100vh-64px)] overflow-y-auto p-8 flex flex-col items-center justify-center text-center">
+            <div className="w-80 border-l bg-gray-50 h-full flex-shrink-0 overflow-y-auto p-8 flex flex-col items-center justify-center text-center">
                 <div className="bg-white p-4 rounded-full shadow-sm mb-4">
                     <Layers className="w-8 h-8 text-gray-400" />
                 </div>
@@ -36,7 +36,7 @@ export const PropertyPanel = () => {
     }
 
     return (
-        <div className="w-80 border-l bg-white h-[calc(100vh-64px)] overflow-y-auto flex flex-col">
+        <div className="w-80 border-l bg-white h-full flex-shrink-0 overflow-y-auto flex flex-col">
             <div className="p-4 border-b flex items-center justify-between bg-gray-50">
                 <div className="flex items-center gap-2">
                     <Settings className="w-4 h-4 text-blue-600" />

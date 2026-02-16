@@ -46,3 +46,19 @@ export const getPageBySlug = async (slug: string, institutionId: string): Promis
   });
   return response.data.data;
 };
+
+export const getPublishedPages = async (institutionId?: string): Promise<Page[]> => {
+  const url = institutionId
+    ? `/public/pages?institutionId=${institutionId}`
+    : '/public/pages';
+  const response = await apiClient.get(url);
+  return response.data.data;
+};
+
+export const getPublishedPageBySlug = async (slug: string, institutionId?: string): Promise<Page> => {
+  const url = institutionId
+    ? `/public/pages/${slug}?institutionId=${institutionId}`
+    : `/public/pages/${slug}`;
+  const response = await apiClient.get(url);
+  return response.data.data;
+};

@@ -6,6 +6,8 @@ import { Statistics } from '../builder-components/Statistics';
 import { FacultyGrid } from '../builder-components/FacultyGrid';
 import { FAQAccordion } from '../builder-components/FAQAccordion';
 import { ContactForm } from '../builder-components/ContactForm';
+import { DynamicSection } from '../builder-components/DynamicSection';
+import { Button } from '../builder-components/Button';
 
 export const ComponentMapper: Record<string, any> = {
     HeroBanner,
@@ -16,4 +18,6 @@ export const ComponentMapper: Record<string, any> = {
     FacultyGrid,
     FAQAccordion,
     ContactForm,
+    DynamicSection,
+    Button,
 };

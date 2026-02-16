@@ -12,6 +12,7 @@ export const AIChat = () => {
     const [prompt, setPrompt] = useState('');
     const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string }[]>([]);
     const [isTyping, setIsTyping] = useState(false);
+    const [mode, setMode] = useState<'command' | 'design'>('command');
     const { actions, query } = useEditor();
 
     const handleSend = async () => {
@@ -23,37 +24,57 @@ export const AIChat = () => {
         setIsTyping(true);
 
         try {
-            // Get current page context for AI
-            const context = query.serialize();
-
-            const response = await aiApi.processCommand(userMessage, JSON.parse(context));
-
-            if (response.success && response.operation) {
-                setMessages((prev) => [...prev, { role: 'ai', content: 'Sure! I have generated the component for you. I\'m adding it to the page now.' }]);
-
-                // Execute the operation
-                if (response.operation.action === 'insert' && response.operation.component) {
-                    const { type, props } = response.operation.component;
-                    const Component = ComponentMapper[type];
-
-                    if (Component) {
-                        // Add to the bottom of the ROOT node
-                        actions.add(
-                            query.createNode(React.createElement(Component, props)),
-                            'ROOT'
-                        );
-                        toast.success(`Added ${type} component!`);
-                    } else {
-                        console.warn(`Component type ${type} not found in mapper`);
-                        toast.error(`Unknown component type: ${type}`);
-                    }
+            if (mode === 'design') {
+                const response = await aiApi.generateComponent(userMessage);
+                if (response.success && response.data) {
+                    window.dispatchEvent(new CustomEvent('customComponentGenerated'));
+                    setMessages((prev) => [...prev, {
+                        role: 'ai',
+                        content: `I've created a new component: **${response.data.name}**. I've added it to the "AI Generated" section in your component library on the left. You can now drag it onto the page!`
+                    }]);
+                    toast.success('New component generated!');
+                } else {
+                    setMessages((prev) => [...prev, { role: 'ai', content: response.error || 'Failed to generate component.' }]);
                 }
             } else {
-                setMessages((prev) => [...prev, { role: 'ai', content: response.error || 'Sorry, I couldn\'t process that request.' }]);
+                // Get current page context for AI
+                const context = query.serialize();
+                const response = await aiApi.processCommand(userMessage, JSON.parse(context));
+
+                if (response.success && response.data) {
+                    setMessages((prev) => [...prev, { role: 'ai', content: 'Sure! I have generated the component for you. I\'m adding it to the page now.' }]);
+
+                    const operation = response.data;
+                    // Execute the operation
+                    if (operation.action === 'insert' && operation.component) {
+                        const { type, props } = operation.component;
+
+                        // Case-insensitive lookup
+                        const typeKey = Object.keys(ComponentMapper).find(
+                            k => k.toLowerCase() === type.toLowerCase()
+                        );
+                        const Component = typeKey ? ComponentMapper[typeKey] : null;
+
+                        if (Component) {
+                            actions.add(
+                                query.createNode(React.createElement(Component, props)),
+                                'ROOT'
+                            );
+                            toast.success(`Added ${type} component!`);
+                        } else {
+                            console.warn(`Component type ${type} not found in mapper`);
+                            toast.error(`Unknown component type: ${type}`);
+                        }
+                    }
+                } else {
+                    setMessages((prev) => [...prev, { role: 'ai', content: response.error || 'Sorry, I couldn\'t process that request.' }]);
+                }
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('AI error:', error);
-            toast.error('Failed to connect to AI service');
+            const errorMessage = error.response?.data?.error?.message || 'Failed to connect to AI service';
+            toast.error(errorMessage);
+            setMessages((prev) => [...prev, { role: 'ai', content: `Error: ${errorMessage}. Please try again.` }]);
         } finally {
             setIsTyping(false);
         }
@@ -68,7 +89,20 @@ export const AIChat = () => {
                             <Bot className="w-6 h-6" />
                             <div>
                                 <h3 className="font-bold text-sm">AI Design Assistant</h3>
-                                <p className="text-[10px] opacity-80">Online & ready to help</p>
+                                <div className="flex gap-2 mt-1">
+                                    <button
+                                        onClick={() => setMode('command')}
+                                        className={`text-[10px] px-2 py-0.5 rounded-full transition ${mode === 'command' ? 'bg-white text-blue-600 font-bold' : 'bg-blue-500/50 text-white'}`}
+                                    >
+                                        Edit Page
+                                    </button>
+                                    <button
+                                        onClick={() => setMode('design')}
+                                        className={`text-[10px] px-2 py-0.5 rounded-full transition ${mode === 'design' ? 'bg-white text-blue-600 font-bold' : 'bg-blue-500/50 text-white'}`}
+                                    >
+                                        New Design
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         <button onClick={() => setIsOpen(false)} className="p-1 hover:bg-blue-500 rounded-full transition">
@@ -83,8 +117,14 @@ export const AIChat = () => {
                                     <Sparkles className="w-8 h-8" />
                                 </div>
                                 <div>
-                                    <h4 className="font-bold text-gray-800">What can I build for you?</h4>
-                                    <p className="text-xs text-gray-500 mt-1">Try: "Add a faculty grid with 4 cards" or "Make the hero title blue"</p>
+                                    <h4 className="font-bold text-gray-800">
+                                        {mode === 'command' ? "What can I build for you?" : "Describe your new component"}
+                                    </h4>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        {mode === 'command'
+                                            ? 'Try: "Add a faculty grid with 4 cards" or "Make the hero title blue"'
+                                            : 'Try: "Create a modern testimonial slider with 3 cards" or "A pricing table with 3 tiers"'}
+                                    </p>
                                 </div>
                             </div>
                         )}
