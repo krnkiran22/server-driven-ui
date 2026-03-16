@@ -29,3 +29,8 @@ export const getCustomComponents = async (): Promise<any> => {
   const response = await apiClient.get('/ai/custom-components');
   return response.data;
 };
+
+export const generatePageHTML = async (prompt: string): Promise<any> => {
+  const response = await apiClient.post('/ai/generate-html', { prompt });
+  return response.data;
+};

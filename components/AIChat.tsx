@@ -7,7 +7,7 @@ import * as aiApi from '@/lib/api/ai.api';
 import { toast } from 'sonner';
 import { ComponentMapper } from './renderer/ComponentMapper';
 
-export const AIChat = () => {
+export const AIChat = ({ onFullBuild }: { onFullBuild?: (prompt: string) => void }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [prompt, setPrompt] = useState('');
     const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string }[]>([]);
@@ -42,9 +42,17 @@ export const AIChat = () => {
                 const response = await aiApi.processCommand(userMessage, JSON.parse(context));
 
                 if (response.success && response.data) {
+                    const operation = response.data;
+
+                    if (operation.action === 'generate_full_html' && onFullBuild) {
+                        setMessages((prev) => [...prev, { role: 'ai', content: 'Sure! I will generate the full page HTML for you now. Please wait a moment.' }]);
+                        onFullBuild(operation.prompt || userMessage);
+                        setIsTyping(false);
+                        return;
+                    }
+
                     setMessages((prev) => [...prev, { role: 'ai', content: 'Sure! I have generated the component for you. I\'m adding it to the page now.' }]);
 
-                    const operation = response.data;
                     // Execute the operation
                     if (operation.action === 'insert' && operation.component) {
                         const { type, props } = operation.component;
@@ -66,7 +74,8 @@ export const AIChat = () => {
                             toast.error(`Unknown component type: ${type}`);
                         }
                     }
-                } else {
+                }
+ else {
                     setMessages((prev) => [...prev, { role: 'ai', content: response.error || 'Sorry, I couldn\'t process that request.' }]);
                 }
             }

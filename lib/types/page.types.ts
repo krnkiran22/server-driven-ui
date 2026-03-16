@@ -23,6 +23,8 @@ export interface Page {
   name: string;
   slug: string;
   jsonConfig: PageJSON;
+  htmlContent?: string;
+  useHtml: boolean;
   isPublished: boolean;
   version: string;
   createdAt: string;
@@ -40,6 +42,8 @@ export interface CreatePageData {
 }
 
 export interface UpdatePageData {
-  jsonConfig: PageJSON;
+  jsonConfig?: PageJSON;
+  htmlContent?: string;
+  useHtml?: boolean;
   changes?: string;
 }

@@ -6,7 +6,7 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { Bot, ArrowRight, ShieldCheck, Lock } from 'lucide-react';
+import { Bot, ArrowRight, ShieldCheck, Lock, Sparkles } from 'lucide-react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');

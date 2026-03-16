@@ -6,7 +6,7 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { Bot, ArrowRight, Sparkles, Building2, UserCircle2, CheckCircle2 } from 'lucide-react';
+import { Bot, ArrowRight, Sparkles, Building2, UserCircle2, CheckCircle2, Globe } from 'lucide-react';
 
 export default function RegisterPage() {
   const [formData, setFormData] = useState({

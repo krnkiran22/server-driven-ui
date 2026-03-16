@@ -17,31 +17,88 @@ interface PageProps {
     params: Promise<{ slug: string }>;
 }
 
+import { generatePageHTML } from '@/lib/api/ai.api';
+
 // Inner component to access CraftJS context
-const EditorWrapper = ({ pageData, onSave, saving, slug }: { pageData: any, onSave: (query: any) => void, saving: boolean, slug: string }) => {
+const EditorWrapper = ({ pageData, onSave, saving, slug, onUpdatePageData }: { 
+    pageData: any, 
+    onSave: (query: any) => void, 
+    saving: boolean, 
+    slug: string,
+    onUpdatePageData: (data: any) => void
+}) => {
     const { query } = useEditor();
+    const [isGenerating, setIsGenerating] = useState(false);
+
+    const handleAIGenerate = async (customPrompt?: string) => {
+        let promptToUse = customPrompt;
+        
+        if (!promptToUse) {
+            promptToUse = window.prompt("Describe the website/page you want to build in a single prompt (e.g., 'A modern engineering college home page with sections for research and admissions'):") || undefined;
+        }
+        
+        if (!promptToUse) return;
+
+        setIsGenerating(true);
+        try {
+            const result = await generatePageHTML(promptToUse);
+            if (result.success) {
+                onUpdatePageData({
+                    ...pageData,
+                    useHtml: true,
+                    htmlContent: result.html
+                });
+                toast.success("AI successfully constructed your page!");
+            }
+        } catch (error) {
+            console.error("AI Generation failed:", error);
+            toast.error("Failed to generate page with AI");
+        } finally {
+            setIsGenerating(false);
+        }
+    };
 
     return (
         <div className="h-screen bg-gray-100 flex flex-col overflow-hidden">
-            <EditorToolbar onSave={() => onSave(query)} isSaving={saving} slug={slug} />
+            <EditorToolbar 
+                onSave={() => onSave(query)} 
+                onAIGenerate={() => handleAIGenerate()} 
+                isSaving={saving} 
+                isGenerating={isGenerating}
+                slug={slug} 
+            />
 
             <div className="flex flex-1 overflow-hidden h-full">
-                <ComponentLibrary />
+                {!pageData?.useHtml && <ComponentLibrary />}
 
                 <main className="flex-1 overflow-y-auto bg-gray-100 p-8 scrollbar-hide">
                     <div className="bg-white shadow-xl min-h-[800px] w-full max-w-5xl mx-auto rounded-lg overflow-hidden relative">
-                        <Frame data={pageData?.jsonConfig?.ROOT ? JSON.stringify(pageData.jsonConfig) : undefined}>
-                            <Element is={Container} canvas minHeight="800px" padding="40px">
-                                {/* Components will be rendered here */}
-                            </Element>
-                        </Frame>
+                        {pageData?.useHtml ? (
+                            <div className="p-0 prose prose-slate max-w-none">
+                                <div dangerouslySetInnerHTML={{ __html: pageData.htmlContent }} />
+                                <div className="absolute top-4 right-4 z-50">
+                                    <button 
+                                        onClick={() => onUpdatePageData({...pageData, useHtml: false})}
+                                        className="bg-red-600 text-white text-[10px] font-black px-4 py-2 rounded-lg shadow-lg"
+                                    >
+                                        Back to Visual Editor
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <Frame data={pageData?.jsonConfig?.ROOT ? JSON.stringify(pageData.jsonConfig) : undefined}>
+                                <Element is={Container} canvas minHeight="800px" padding="40px">
+                                    {/* Components will be rendered here */}
+                                </Element>
+                            </Frame>
+                        )}
                     </div>
                 </main>
 
-                <PropertyPanel />
+                {!pageData?.useHtml && <PropertyPanel />}
             </div>
 
-            <AIChat />
+            <AIChat onFullBuild={handleAIGenerate} />
         </div>
     );
 };
@@ -86,7 +143,11 @@ export default function EditPage({ params }: PageProps) {
         setSaving(true);
         try {
             const json = query.serialize();
-            await pagesApi.updatePage(pageData._id, { jsonConfig: JSON.parse(json) });
+            await pagesApi.updatePage(pageData._id, { 
+                jsonConfig: JSON.parse(json),
+                htmlContent: pageData.htmlContent,
+                useHtml: pageData.useHtml 
+            });
             toast.success('Page saved successfully');
         } catch (error) {
             console.error('Failed to save page:', error);
@@ -126,7 +187,13 @@ export default function EditPage({ params }: PageProps) {
                 return <div className="relative">{render}</div>;
             }}
         >
-            <EditorWrapper pageData={pageData} onSave={handleSave} saving={saving} slug={slug} />
+            <EditorWrapper 
+                pageData={pageData} 
+                onSave={handleSave} 
+                saving={saving} 
+                slug={slug} 
+                onUpdatePageData={setPageData}
+            />
         </Editor>
     );
 }

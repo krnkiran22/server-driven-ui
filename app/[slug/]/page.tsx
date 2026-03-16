@@ -73,14 +73,21 @@ export default function PublicPage({ params }: PageProps) {
     // Public View - Fixed (No Editor controls ever)
     return (
         <div className="min-h-screen bg-white">
-            <Editor
-                enabled={false}
-                resolver={ComponentMapper}
-            >
-                <Frame data={pageData?.jsonConfig?.ROOT ? JSON.stringify(pageData.jsonConfig) : undefined}>
-                    <Element is={Container} canvas />
-                </Frame>
-            </Editor>
+            {pageData.useHtml && pageData.htmlContent ? (
+                <div 
+                    dangerouslySetInnerHTML={{ __html: pageData.htmlContent }} 
+                    className="w-full min-h-screen"
+                />
+            ) : (
+                <Editor
+                    enabled={false}
+                    resolver={ComponentMapper}
+                >
+                    <Frame data={pageData?.jsonConfig?.ROOT ? JSON.stringify(pageData.jsonConfig) : undefined}>
+                        <Element is={Container} canvas />
+                    </Frame>
+                </Editor>
+            )}
 
             {/* Minimalist Login link for admins at the bottom */}
             {user && (user.role === 'admin' || user.role === 'editor' || user.role === 'super-admin') && (
