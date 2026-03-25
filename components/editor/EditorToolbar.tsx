@@ -7,7 +7,7 @@ import Button from '../ui/Button';
 
 interface EditorToolbarProps {
     onSave: () => void;
-    onAIGenerate: () => void;
+    onAIGenerate?: () => void;
     isSaving?: boolean;
     isGenerating?: boolean;
     slug?: string;
@@ -56,16 +56,18 @@ export const EditorToolbar = ({ onSave, onAIGenerate, isSaving, isGenerating, sl
             </div>
 
             <div className="flex items-center gap-4">
-                <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={onAIGenerate}
-                    disabled={isGenerating}
-                    className="h-10 px-4 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-600 border border-purple-100 font-black uppercase tracking-widest text-[10px] flex items-center gap-2 transition-all hover:-translate-y-0.5"
-                >
-                    <Sparkles className="w-4 h-4" />
-                    {isGenerating ? 'Generating...' : 'AI Full Build'}
-                </Button>
+                {onAIGenerate && (
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onAIGenerate}
+                        disabled={isGenerating}
+                        className="h-10 px-4 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-600 border border-purple-100 font-black uppercase tracking-widest text-[10px] flex items-center gap-2 transition-all hover:-translate-y-0.5"
+                    >
+                        <Sparkles className="w-4 h-4" />
+                        {isGenerating ? 'Generating...' : 'AI Full Build'}
+                    </Button>
+                )}
 
                 {slug && (
                     <a

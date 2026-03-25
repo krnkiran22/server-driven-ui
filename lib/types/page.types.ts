@@ -39,6 +39,7 @@ export interface Page {
 export interface CreatePageData {
   name: string;
   slug: string;
+  useHtml?: boolean;
 }
 
 export interface UpdatePageData {

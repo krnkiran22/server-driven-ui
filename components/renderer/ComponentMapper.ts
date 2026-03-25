@@ -8,6 +8,7 @@ import { FAQAccordion } from '../builder-components/FAQAccordion';
 import { ContactForm } from '../builder-components/ContactForm';
 import { DynamicSection } from '../builder-components/DynamicSection';
 import { Button } from '../builder-components/Button';
+import { RawHTML } from '../builder-components/RawHTML';
 
 export const ComponentMapper: Record<string, any> = {
     HeroBanner,
@@ -20,4 +21,5 @@ export const ComponentMapper: Record<string, any> = {
     ContactForm,
     DynamicSection,
     Button,
+    RawHTML,
 };

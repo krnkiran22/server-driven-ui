@@ -74,10 +74,13 @@ export default function PublicPage({ params }: PageProps) {
     return (
         <div className="min-h-screen bg-white">
             {pageData.useHtml && pageData.htmlContent ? (
-                <div 
-                    dangerouslySetInnerHTML={{ __html: pageData.htmlContent }} 
-                    className="w-full min-h-screen"
-                />
+                <>
+                    <script src="https://cdn.tailwindcss.com"></script>
+                    <div 
+                        dangerouslySetInnerHTML={{ __html: pageData.htmlContent }} 
+                        className="w-full min-h-screen bg-white"
+                    />
+                </>
             ) : (
                 <Editor
                     enabled={false}

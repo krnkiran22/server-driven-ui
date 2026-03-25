@@ -2,18 +2,31 @@
 
 import React, { useState } from 'react';
 import { useEditor } from '@craftjs/core';
-import { Bot, Send, X, Sparkles, MessageSquare } from 'lucide-react';
+import { Bot, Send, X, Sparkles, MessageSquare, FileCode, Layers, Wand2 } from 'lucide-react';
 import * as aiApi from '@/lib/api/ai.api';
 import { toast } from 'sonner';
 import { ComponentMapper } from './renderer/ComponentMapper';
 
-export const AIChat = ({ onFullBuild }: { onFullBuild?: (prompt: string) => void }) => {
+export type ChatMode = 'command' | 'design' | 'full';
+
+export const AIChat = ({ 
+    onFullBuild, 
+    onModeChange 
+}: { 
+    onFullBuild?: (prompt: string) => void,
+    onModeChange?: (mode: ChatMode) => void
+}) => {
     const [isOpen, setIsOpen] = useState(false);
     const [prompt, setPrompt] = useState('');
     const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string }[]>([]);
     const [isTyping, setIsTyping] = useState(false);
-    const [mode, setMode] = useState<'command' | 'design'>('command');
+    const [mode, setMode] = useState<ChatMode>('command');
     const { actions, query } = useEditor();
+
+    const handleModeChange = (newMode: ChatMode) => {
+        setMode(newMode);
+        onModeChange?.(newMode);
+    };
 
     const handleSend = async () => {
         if (!prompt.trim()) return;
@@ -24,13 +37,20 @@ export const AIChat = ({ onFullBuild }: { onFullBuild?: (prompt: string) => void
         setIsTyping(true);
 
         try {
+            if (mode === 'full' && onFullBuild) {
+                setMessages((prev) => [...prev, { role: 'ai', content: 'Architecting your full website now. I am compiling the HTML and styling it with Tailwind. Please check the Code Editor view.' }]);
+                onFullBuild(userMessage);
+                setIsTyping(false);
+                return;
+            }
+
             if (mode === 'design') {
                 const response = await aiApi.generateComponent(userMessage);
                 if (response.success && response.data) {
                     window.dispatchEvent(new CustomEvent('customComponentGenerated'));
                     setMessages((prev) => [...prev, {
                         role: 'ai',
-                        content: `I've created a new component: **${response.data.name}**. I've added it to the "AI Generated" section in your component library on the left. You can now drag it onto the page!`
+                        content: `I've created a new component: **${response.data.name}**. I've added it to the "AI Generated" section. You can now drag it onto the page!`
                     }]);
                     toast.success('New component generated!');
                 } else {
@@ -43,15 +63,26 @@ export const AIChat = ({ onFullBuild }: { onFullBuild?: (prompt: string) => void
 
                 if (response.success && response.data) {
                     const operation = response.data;
+                    console.log('AI Operation received:', operation);
 
-                    if (operation.action === 'generate_full_html' && onFullBuild) {
-                        setMessages((prev) => [...prev, { role: 'ai', content: 'Sure! I will generate the full page HTML for you now. Please wait a moment.' }]);
-                        onFullBuild(operation.prompt || userMessage);
-                        setIsTyping(false);
-                        return;
+                    if (operation.action === 'generate_full_html') {
+                        console.log('Action is generate_full_html, onFullBuild is:', !!onFullBuild);
+                        if (onFullBuild) {
+                            setMessages((prev) => [...prev, { role: 'ai', content: 'You requested a full page. I am generating the complete HTML now. Switching you to Code mode...' }]);
+                            handleModeChange('full'); 
+                            onFullBuild(operation.prompt || userMessage);
+                            setIsTyping(false);
+                            return;
+                        } else {
+                            console.error('onFullBuild callback is missing!');
+                        }
                     }
 
-                    setMessages((prev) => [...prev, { role: 'ai', content: 'Sure! I have generated the component for you. I\'m adding it to the page now.' }]);
+                    // For specific block modifications
+                    if (operation.action === 'insert' || operation.action === 'update' || operation.action === 'delete') {
+                        console.log('Action is block modification:', operation.action);
+                        setMessages((prev) => [...prev, { role: 'ai', content: 'Updating your design now...' }]);
+                    }
 
                     // Execute the operation
                     if (operation.action === 'insert' && operation.component) {
@@ -70,8 +101,18 @@ export const AIChat = ({ onFullBuild }: { onFullBuild?: (prompt: string) => void
                             );
                             toast.success(`Added ${type} component!`);
                         } else {
-                            console.warn(`Component type ${type} not found in mapper`);
-                            toast.error(`Unknown component type: ${type}`);
+                            // Fallback: If it's a "template" or "page" request that the AI misclassified as insert
+                            if ((type.toLowerCase().includes('template') || type.toLowerCase().includes('page')) && onFullBuild) {
+                                setMessages((prev) => [...prev, { 
+                                    role: 'ai', 
+                                    content: `I don't have a specific "${type}" component, but I can build a full page for you using that theme. Generating full HTML now...` 
+                                }]);
+                                onFullBuild(userMessage);
+                            } else {
+                                console.warn(`Component type ${type} not found in mapper`);
+                                toast.error(`Unknown component type: ${type}`);
+                                setMessages((prev) => [...prev, { role: 'ai', content: `Sorry, I don't know how to create a "${type}" component yet. Try asking for a HeroBanner or TextBlock.` }]);
+                            }
                         }
                     }
                 }
@@ -81,7 +122,15 @@ export const AIChat = ({ onFullBuild }: { onFullBuild?: (prompt: string) => void
             }
         } catch (error: any) {
             console.error('AI error:', error);
-            const errorMessage = error.response?.data?.error?.message || 'Failed to connect to AI service';
+            const responseData = error.response?.data;
+            let errorMessage = responseData?.error?.message || 'Failed to connect to AI service';
+            
+            // Check for validation errors and show details
+            if (responseData?.error?.code === 'VALIDATION_ERROR' && responseData.error.details) {
+                const details = responseData.error.details.map((d: any) => `${d.field}: ${d.message}`).join(', ');
+                errorMessage = `Validation error - ${details}`;
+            }
+            
             toast.error(errorMessage);
             setMessages((prev) => [...prev, { role: 'ai', content: `Error: ${errorMessage}. Please try again.` }]);
         } finally {
@@ -98,23 +147,29 @@ export const AIChat = ({ onFullBuild }: { onFullBuild?: (prompt: string) => void
                             <Bot className="w-6 h-6" />
                             <div>
                                 <h3 className="font-bold text-sm">AI Design Assistant</h3>
-                                <div className="flex gap-2 mt-1">
+                                <div className="flex gap-1.5 mt-2">
                                     <button
-                                        onClick={() => setMode('command')}
-                                        className={`text-[10px] px-2 py-0.5 rounded-full transition ${mode === 'command' ? 'bg-white text-blue-600 font-bold' : 'bg-blue-500/50 text-white'}`}
+                                        onClick={() => handleModeChange('command')}
+                                        className={`text-[9px] px-2 py-1 rounded-full border transition-all flex items-center gap-1 ${mode === 'command' ? 'bg-white text-blue-600 border-white font-black' : 'bg-transparent text-white/70 border-white/20'}`}
                                     >
-                                        Edit Page
+                                        <Layers className="w-2.5 h-2.5" /> Edit Blocks
                                     </button>
                                     <button
-                                        onClick={() => setMode('design')}
-                                        className={`text-[10px] px-2 py-0.5 rounded-full transition ${mode === 'design' ? 'bg-white text-blue-600 font-bold' : 'bg-blue-500/50 text-white'}`}
+                                        onClick={() => handleModeChange('design')}
+                                        className={`text-[9px] px-2 py-1 rounded-full border transition-all flex items-center gap-1 ${mode === 'design' ? 'bg-white text-blue-600 border-white font-black' : 'bg-transparent text-white/70 border-white/20'}`}
                                     >
-                                        New Design
+                                        <Wand2 className="w-2.5 h-2.5" /> New Component
+                                    </button>
+                                    <button
+                                        onClick={() => handleModeChange('full')}
+                                        className={`text-[9px] px-2 py-1 rounded-full border transition-all flex items-center gap-1 ${mode === 'full' ? 'bg-white text-blue-600 border-white font-black' : 'bg-transparent text-white/70 border-white/20'}`}
+                                    >
+                                        <FileCode className="w-2.5 h-2.5" /> Full Build
                                     </button>
                                 </div>
                             </div>
                         </div>
-                        <button onClick={() => setIsOpen(false)} className="p-1 hover:bg-blue-500 rounded-full transition">
+                        <button onClick={() => setIsOpen(false)} className="p-1 hover:bg-white/10 rounded-full transition">
                             <X className="w-5 h-5" />
                         </button>
                     </div>
@@ -127,12 +182,14 @@ export const AIChat = ({ onFullBuild }: { onFullBuild?: (prompt: string) => void
                                 </div>
                                 <div>
                                     <h4 className="font-bold text-gray-800">
-                                        {mode === 'command' ? "What can I build for you?" : "Describe your new component"}
+                                        {mode === 'command' ? "Block Editor Mode" : mode === 'design' ? "Component Architect Mode" : "Full Page Build Mode"}
                                     </h4>
                                     <p className="text-xs text-gray-500 mt-1">
                                         {mode === 'command'
-                                            ? 'Try: "Add a faculty grid with 4 cards" or "Make the hero title blue"'
-                                            : 'Try: "Create a modern testimonial slider with 3 cards" or "A pricing table with 3 tiers"'}
+                                            ? 'Ask to subheadings, change colors, or add existing blocks.'
+                                            : mode === 'design'
+                                            ? 'Describe a new component to build from scratch (e.g. Testimonial Slider).'
+                                            : 'Ask for a complete website page. The AI will write the full HTML code.'}
                                     </p>
                                 </div>
                             </div>

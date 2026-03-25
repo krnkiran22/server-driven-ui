@@ -48,9 +48,15 @@ export const getPageBySlug = async (slug: string, institutionId: string): Promis
 };
 
 export const getPublishedPages = async (institutionId?: string): Promise<Page[]> => {
-  const url = institutionId
-    ? `/public/pages?institutionId=${institutionId}`
-    : '/public/pages';
+  const params = new URLSearchParams();
+  if (institutionId && institutionId !== 'undefined') {
+    params.append('institutionId', institutionId);
+  }
+  
+  const queryString = params.toString();
+  const url = `/public/pages${queryString ? `?${queryString}` : ''}`;
+  
+  console.log(`Fetching published pages: ${url}`);
   const response = await apiClient.get(url);
   return response.data.data;
 };

@@ -12,6 +12,7 @@ import { FacultyGrid } from '../builder-components/FacultyGrid';
 import { FAQAccordion } from '../builder-components/FAQAccordion';
 import { ContactForm } from '../builder-components/ContactForm';
 import { Button } from '../builder-components/Button';
+import { RawHTML } from '../builder-components/RawHTML';
 import { ComponentMapper } from '../renderer/ComponentMapper';
 import * as aiApi from '@/lib/api/ai.api';
 import { Sparkles, Code } from 'lucide-react';
@@ -99,6 +100,12 @@ export const ComponentLibrary = () => {
             icon: <MousePointer2 className="w-5 h-5 text-indigo-500" />,
             component: <Button />,
             description: 'A customizable call-to-action button.'
+        },
+        {
+            name: 'Custom HTML',
+            icon: <Code className="w-5 h-5 text-emerald-500" />,
+            component: <RawHTML />,
+            description: 'Embed custom HTML and Tailwind classes.'
         }
     ];
 

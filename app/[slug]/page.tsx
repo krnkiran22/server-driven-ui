@@ -1,47 +1,43 @@
 'use client';
 
-import React, { useEffect, useState, use } from 'react';
-import { Editor, Frame, Element, useEditor } from '@craftjs/core';
-import { useRouter } from 'next/navigation';
-import { EditorToolbar } from '@/components/editor/EditorToolbar';
-import { ComponentLibrary } from '@/components/editor/ComponentLibrary';
-import { PropertyPanel } from '@/components/editor/PropertyPanel';
+import React, { useEffect, useState, use, useRef } from 'react';
+import { Editor, Frame, Element } from '@craftjs/core';
 import { ComponentMapper } from '@/components/renderer/ComponentMapper';
 import * as pagesApi from '@/lib/api/pages.api';
 import { useAuth } from '@/lib/context/AuthContext';
 import { toast } from 'sonner';
 import { Container } from '@/components/builder-components/Container';
-import { AIChat } from '@/components/AIChat';
+import { Edit3, ExternalLink } from 'lucide-react';
 
 interface PageProps {
     params: Promise<{ slug: string }>;
 }
 
-// Inner component to access CraftJS context
-const EditorWrapper = ({ pageData, onSave, saving }: { pageData: any, onSave: (query: any) => void, saving: boolean }) => {
-    const { query } = useEditor();
+import { SafeHTMLRenderer } from '@/components/editor/SafeHTMLRenderer';
 
+// ── Renders AI-generated HTML in a perfectly isolated full-page viewport ─────
+const FullPageRenderer = ({ html, slug, isAdmin }: { html: string; slug: string; isAdmin: boolean }) => {
     return (
-        <div className="min-h-screen bg-gray-100 flex flex-col">
-            <EditorToolbar onSave={() => onSave(query)} isSaving={saving} />
+        <div className="fixed inset-0 w-screen h-screen bg-white overflow-hidden flex flex-col">
+            <SafeHTMLRenderer 
+                html={html} 
+                fullPage 
+                className="flex-1 w-full h-full"
+            />
 
-            <div className="flex flex-1 overflow-hidden">
-                <ComponentLibrary />
-
-                <main className="flex-1 overflow-y-auto bg-gray-100 p-8 scrollbar-hide">
-                    <div className="bg-white shadow-xl min-h-[800px] w-full max-w-5xl mx-auto rounded-lg overflow-hidden relative">
-                        <Frame data={pageData?.jsonConfig?.ROOT ? JSON.stringify(pageData.jsonConfig) : undefined}>
-                            <Element is={Container} canvas minHeight="800px" padding="40px">
-                                {/* Components will be rendered here */}
-                            </Element>
-                        </Frame>
-                    </div>
-                </main>
-
-                <PropertyPanel />
-            </div>
-
-            <AIChat />
+            {/* Admin floating edit button */}
+            {isAdmin && (
+                <div className="fixed bottom-8 right-8 z-[9999]">
+                    <a
+                        href={`/edit/${slug}`}
+                        className="flex items-center gap-2 bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-black uppercase tracking-widest px-6 py-3.5 rounded-2xl shadow-2xl shadow-violet-900/40 transition-all hover:scale-105 active:scale-95 whitespace-nowrap"
+                        style={{ fontFamily: 'Inter, sans-serif' }}
+                    >
+                        <Edit3 className="w-4 h-4" />
+                        Edit Page
+                    </a>
+                </div>
+            )}
         </div>
     );
 };
@@ -51,8 +47,6 @@ export default function DynamicPage({ params }: PageProps) {
     const { user, isLoading: authLoading } = useAuth();
     const [pageData, setPageData] = useState<any>(null);
     const [loading, setLoading] = useState(true);
-    const [saving, setSaving] = useState(false);
-    const router = useRouter();
 
     useEffect(() => {
         const fetchPage = async () => {
@@ -61,7 +55,6 @@ export default function DynamicPage({ params }: PageProps) {
                 setPageData(data);
             } catch (error) {
                 console.error('Failed to fetch page:', error);
-                // If not found, show a toast but don't redirect yet
                 toast.error('Page not found');
             } finally {
                 setLoading(false);
@@ -73,57 +66,63 @@ export default function DynamicPage({ params }: PageProps) {
         }
     }, [slug, user, authLoading]);
 
-    const handleSave = async (query: any) => {
-        if (!pageData?._id) {
-            toast.error('No page ID found to save');
-            return;
-        }
-
-        setSaving(true);
-        try {
-            const json = query.serialize();
-            await pagesApi.updatePage(pageData._id, { jsonConfig: JSON.parse(json) });
-            toast.success('Page saved successfully');
-        } catch (error) {
-            console.error('Failed to save page:', error);
-            toast.error('Failed to save page');
-        } finally {
-            setSaving(false);
-        }
-    };
-
+    // ── Loading state ─────────────────────────────────────────────────────────
     if (loading || authLoading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-white">
                 <div className="flex flex-col items-center gap-4">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
                     <p className="text-gray-500 font-medium">Loading your website...</p>
                 </div>
             </div>
         );
     }
 
-    // Admin View with Editor
-    if (user && (user.role === 'admin' || user.role === 'editor' || user.role === 'super-admin')) {
+    const isAdmin = user && (user.role === 'admin' || user.role === 'editor' || user.role === 'super-admin');
+
+    // ── HTML mode (AI-generated full page) ───────────────────────────────────
+    // Both admins and public visitors see the rendered HTML directly in the page.
+    if (pageData?.useHtml && pageData?.htmlContent) {
         return (
-            <Editor
-                resolver={ComponentMapper}
-                onRender={({ render }) => {
-                    return <div className="relative">{render}</div>;
-                }}
-            >
-                <EditorWrapper pageData={pageData} onSave={handleSave} saving={saving} />
-            </Editor>
+            <FullPageRenderer
+                html={pageData.htmlContent}
+                slug={slug}
+                isAdmin={!!isAdmin}
+            />
         );
     }
 
-    // Public View
+    // ── Admin block editor view ───────────────────────────────────────────────
+    // Only shown for admins when the page is NOT in HTML mode.
+    // In this case we redirect admins to the dedicated /edit/[slug] route
+    // which has the full toolbar and AI builder.
+    if (isAdmin) {
+        return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                <div className="text-center space-y-4 p-8">
+                    <div className="w-16 h-16 rounded-2xl bg-violet-100 flex items-center justify-center mx-auto">
+                        <Edit3 className="w-8 h-8 text-violet-600" />
+                    </div>
+                    <h2 className="text-xl font-bold text-gray-900">Open in Editor</h2>
+                    <p className="text-gray-500 text-sm max-w-xs mx-auto">
+                        This page uses the visual block editor. Click below to open the full editor.
+                    </p>
+                    <a
+                        href={`/edit/${slug}`}
+                        className="inline-flex items-center gap-2 bg-violet-600 hover:bg-violet-500 text-white font-bold px-6 py-3 rounded-xl transition-all hover:scale-105"
+                    >
+                        <ExternalLink className="w-4 h-4" />
+                        Open Editor
+                    </a>
+                </div>
+            </div>
+        );
+    }
+
+    // ── Public CraftJS block view ─────────────────────────────────────────────
     return (
         <div className="min-h-screen bg-white">
-            <Editor
-                enabled={false}
-                resolver={ComponentMapper}
-            >
+            <Editor enabled={false} resolver={ComponentMapper}>
                 <Frame data={pageData?.jsonConfig?.ROOT ? JSON.stringify(pageData.jsonConfig) : undefined}>
                     <Element is={Container} canvas />
                 </Frame>
