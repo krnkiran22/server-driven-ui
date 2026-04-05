@@ -353,15 +353,14 @@ export default function DashboardPage() {
                               Configure UI
                             </Link>
                           )}
-                          <a
+                          <Link
                             href={`/${page.slug}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="h-12 w-12 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 hover:bg-blue-600 hover:text-white transition-all shadow-xs"
-                            title="View Live"
+                            className="h-12 px-5 rounded-xl bg-blue-600 hover:bg-blue-700 flex items-center gap-2 text-white text-sm font-bold transition-all shadow-sm hover:shadow-blue-200 hover:-translate-y-0.5"
+                            title="Play / Preview"
                           >
-                            <ExternalLink className="w-5 h-5" />
-                          </a>
+                            <ExternalLink className="w-4 h-4" />
+                            Play
+                          </Link>
                           <button className="h-12 w-12 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400 hover:bg-gray-100 transition-all">
                             <MoreVertical className="w-5 h-5" />
                           </button>

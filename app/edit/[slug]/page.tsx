@@ -437,7 +437,7 @@ const EditorWrapper = ({
         setIsGenerating(true);
         setGenStatus('Updating components based on your request...');
         try {
-            const result = await modifyPageHTML(promptToUse, pageData.htmlContent);
+            const result = await modifyPageHTML(promptToUse, pageData.htmlContent, slug);
             const html: string | undefined = result?.data?.html ?? result?.html;
 
             if (result.success && html) {

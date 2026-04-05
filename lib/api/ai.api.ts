@@ -35,7 +35,11 @@ export const generatePageHTML = async (prompt: string): Promise<any> => {
   return response.data;
 };
 
-export const modifyPageHTML = async (prompt: string, currentHtml: string): Promise<any> => {
-  const response = await apiClient.post('/ai/modify-html', { prompt, currentHtml });
+export const modifyPageHTML = async (
+  prompt: string,
+  currentHtml: string,
+  currentSlug?: string
+): Promise<any> => {
+  const response = await apiClient.post('/ai/modify-html', { prompt, currentHtml, currentSlug });
   return response.data;
 };
