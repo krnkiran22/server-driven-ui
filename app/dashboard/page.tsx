@@ -37,6 +37,7 @@ interface SitePage {
   name: string;
   slug: string;
   purpose: string;
+  templateType?: string;
 }
 
 type BuildStatus = 'pending' | 'building' | 'done' | 'error';
@@ -103,24 +104,19 @@ const FullSiteBuilderModal = ({
 
     const createdPages: Page[] = [];
 
+    // Step 0 — delete ALL existing pages so old builds don't bleed in
+    try {
+      const existing = await pagesApi.getAllPages();
+      await Promise.all(existing.map((p) => pagesApi.deletePage(p._id)));
+    } catch {
+      // Non-fatal — proceed even if some deletes fail
+    }
+
     // Step 1 — create all DB records first (so every page's navbar has all slugs)
     try {
       for (const p of sitePlan) {
-        try {
-          const created = await pagesApi.createPage({ name: p.name, slug: p.slug, useHtml: true });
-          createdPages.push(created);
-        } catch (err: any) {
-          if (err?.response?.status === 409) {
-            // Slug conflict — try with a timestamp suffix
-            const altSlug = `${p.slug}-${Date.now().toString().slice(-4)}`;
-            const created = await pagesApi.createPage({ name: p.name, slug: altSlug, useHtml: true });
-            createdPages.push(created);
-            // Patch the plan so slug is correct in nav context
-            p.slug = altSlug;
-          } else {
-            throw err;
-          }
-        }
+        const created = await pagesApi.createPage({ name: p.name, slug: p.slug, useHtml: true });
+        createdPages.push(created);
       }
     } catch (err) {
       toast.error('Failed to create pages in database.');
@@ -146,33 +142,38 @@ const FullSiteBuilderModal = ({
         // Build a rich per-page prompt that names all pages
         const navList = sitePlan.map((sp) => `${sp.name} (/${sp.slug})`).join(', ');
         const pagePrompt =
-          `Build the "${p.name}" page (slug: /${p.slug}) for the following website: ${prompt}.\n\n` +
-          `PAGE CONTENT: ${p.purpose}\n\n` +
-          `FULL SITE NAVIGATION: ${navList}. ` +
-          `The navbar MUST link to ALL these pages. The current page is "${p.name}" — mark it as active/highlighted in the navbar. ` +
-          `Every CTA or category button that logically leads to another page MUST use the real href (e.g. "Shop Men's" → /mens). ` +
-          `Keep the same color scheme and design system across all pages.`;
+          `Build the "${p.name}" page for a website about: ${prompt}. ` +
+          `This page's content: ${p.purpose}. ` +
+          `All site pages: ${navList}.`;
 
-        const result = await generatePageHTML(pagePrompt, p.slug);
+        const result = await generatePageHTML(pagePrompt, p.slug, p.templateType);
+        // backend returns { data: { html } } via axios, or { html } directly
         const html: string | undefined = result?.data?.html ?? result?.html;
+        const serverError: string | undefined = result?.data?.error ?? result?.error;
 
-        if (html) {
-          await pagesApi.updatePage(created._id, {
-            htmlContent: html,
-            useHtml: true,
-            jsonConfig: created.jsonConfig,
-          });
-          finalPages.push({ ...created, htmlContent: html, useHtml: true });
-          setBuildStates((prev) =>
-            prev.map((s, j) => (j === i ? { ...s, status: 'done' } : s))
-          );
-        } else {
-          throw new Error('Empty HTML returned');
-        }
+        if (serverError) throw new Error(serverError);
+        if (!html) throw new Error('No page content returned — check AI API key or try again');
+
+        await pagesApi.updatePage(created._id, {
+          htmlContent: html,
+          useHtml: true,
+          jsonConfig: created.jsonConfig,
+        });
+        finalPages.push({ ...created, htmlContent: html, useHtml: true });
+        setBuildStates((prev) =>
+          prev.map((s, j) => (j === i ? { ...s, status: 'done' } : s))
+        );
       } catch (err: any) {
+        // sendError returns { error: { message } } — drill into it
+        const errMsg: string =
+          err?.response?.data?.error?.message ||
+          err?.response?.data?.message ||
+          err?.message ||
+          'Build failed';
+        console.error(`Page "${p.name}" failed:`, errMsg);
         setBuildStates((prev) =>
           prev.map((s, j) =>
-            j === i ? { ...s, status: 'error', error: err.message || 'Generation failed' } : s
+            j === i ? { ...s, status: 'error', error: errMsg } : s
           )
         );
       }
@@ -377,7 +378,7 @@ const FullSiteBuilderModal = ({
                       {p.name}
                     </span>
                     {p.status === 'building' && (
-                      <p className="text-[10px] text-blue-400/70 font-medium mt-0.5">Generating HTML…</p>
+                      <p className="text-[10px] text-blue-400/70 font-medium mt-0.5">Building page…</p>
                     )}
                     {p.status === 'error' && (
                       <p className="text-[10px] text-red-400/70 font-medium mt-0.5">{p.error}</p>
@@ -616,14 +617,16 @@ export default function DashboardPage() {
   };
 
   const handleSiteDone = async (newPages: Page[]) => {
-    // Refresh page list from DB
+    // Refresh page list from DB — shows only the freshly built pages
     try {
       const data = await pagesApi.getAllPages();
       setPages(data);
     } catch {
-      setPages((prev) => [...prev, ...newPages]);
+      setPages(newPages);
     }
-    toast.success(`${newPages.length} pages built successfully!`);
+    if (newPages.length > 0) {
+      toast.success(`${newPages.length} pages built successfully!`);
+    }
   };
 
   if (isLoading) {

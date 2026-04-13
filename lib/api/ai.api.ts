@@ -35,8 +35,12 @@ export const planSite = async (prompt: string): Promise<any> => {
   return response.data;
 };
 
-export const generatePageHTML = async (prompt: string, currentSlug?: string): Promise<any> => {
-  const response = await apiClient.post('/ai/generate-html', { prompt, currentSlug });
+export const generatePageHTML = async (
+  prompt: string,
+  currentSlug?: string,
+  templateType?: string
+): Promise<any> => {
+  const response = await apiClient.post('/ai/generate-html', { prompt, currentSlug, templateType });
   return response.data;
 };
 

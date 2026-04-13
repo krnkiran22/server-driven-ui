@@ -65,7 +65,7 @@ export const EditorToolbar = ({ onSave, onAIGenerate, isSaving, isGenerating, sl
                         className="h-10 px-4 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-600 border border-purple-100 font-black uppercase tracking-widest text-[10px] flex items-center gap-2 transition-all hover:-translate-y-0.5"
                     >
                         <Sparkles className="w-4 h-4" />
-                        {isGenerating ? 'Generating...' : 'AI Full Build'}
+                        {isGenerating ? 'Building...' : 'AI Full Build'}
                     </Button>
                 )}
 

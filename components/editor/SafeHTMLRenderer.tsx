@@ -17,14 +17,47 @@ export const SafeHTMLRenderer = ({
 }: SafeHTMLRendererProps) => {
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
+  // Script that intercepts all link clicks and sends them to the parent window
+  // (fixes the bug where clicking navbar links inside the iframe only navigates
+  //  the iframe itself instead of the full Next.js app)
+  const NAV_INTERCEPTOR = `<script>
+(function() {
+  document.addEventListener('click', function(e) {
+    var a = e.target.closest('a[href]');
+    if (!a) return;
+    var href = a.getAttribute('href');
+    if (!href) return;
+    // Ignore anchors, mailto, tel and explicit new-tab links
+    if (href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || a.target === '_blank') return;
+    // Only intercept same-origin / relative links (real page navigation)
+    try {
+      var url = new URL(href, window.location.href);
+      if (url.origin === window.location.origin) {
+        e.preventDefault();
+        try { window.top.location.href = url.pathname + url.search + url.hash; }
+        catch(ex) { window.location.href = href; }
+      }
+    } catch(ex) {}
+  }, true);
+})();
+<\/script>`;
+
   // Detect if AI returned a full document or just body content
   const isFullDocument =
     html.toLowerCase().includes('<!doctype') ||
     html.toLowerCase().trimStart().startsWith('<html');
 
-  // Build the srcDoc
+  // Inject the interceptor before </body> in full docs, or wrap partial HTML
+  const injectInterceptor = (rawHtml: string): string => {
+    const closeBody = rawHtml.lastIndexOf('</body>');
+    if (closeBody !== -1) {
+      return rawHtml.slice(0, closeBody) + NAV_INTERCEPTOR + rawHtml.slice(closeBody);
+    }
+    return rawHtml + NAV_INTERCEPTOR;
+  };
+
   const srcDoc = isFullDocument
-    ? html
+    ? injectInterceptor(html)
     : `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -41,6 +74,7 @@ export const SafeHTMLRenderer = ({
 </head>
 <body class="bg-white">
   ${html}
+  ${NAV_INTERCEPTOR}
 </body>
 </html>`;
 

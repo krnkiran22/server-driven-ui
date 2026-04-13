@@ -105,7 +105,7 @@ export const AIChat = ({
                             if ((type.toLowerCase().includes('template') || type.toLowerCase().includes('page')) && onFullBuild) {
                                 setMessages((prev) => [...prev, { 
                                     role: 'ai', 
-                                    content: `I don't have a specific "${type}" component, but I can build a full page for you using that theme. Generating full HTML now...` 
+                                    content: `I don't have a specific "${type}" component, but I can build a full page for you using that theme. Building your page now...` 
                                 }]);
                                 onFullBuild(userMessage);
                             } else {
