@@ -409,7 +409,7 @@ const EditorWrapper = ({
         setIsGenerating(true);
         setGenStatus('Architecting the full page layout...');
         try {
-            const result = await generatePageHTML(promptToUse);
+            const result = await generatePageHTML(promptToUse, slug);
             const html: string | undefined = result?.data?.html ?? result?.html;
 
             if (result.success && html) {

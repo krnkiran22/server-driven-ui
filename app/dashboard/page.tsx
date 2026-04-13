@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/context/AuthContext';
 import * as pagesApi from '@/lib/api/pages.api';
+import { planSite, generatePageHTML } from '@/lib/api/ai.api';
 import { Page } from '@/lib/types/page.types';
 import { toast } from 'sonner';
 import {
@@ -22,19 +23,447 @@ import {
   X,
   Wand2,
   MousePointer2,
-  ArrowRight
+  ArrowRight,
+  Globe,
+  CheckCircle2,
+  Loader2,
+  AlertCircle,
+  Send,
 } from 'lucide-react';
 import Button from '@/components/ui/Button';
 
-// ── NEW PAGE MODAL ───────────────────────────────────────────────────────────
-const NewPageModal = ({ 
-  isOpen, 
-  onClose, 
-  onCreate 
-}: { 
-  isOpen: boolean; 
-  onClose: () => void; 
-  onCreate: (name: string, slug: string, mode: 'canvas' | 'ai') => void 
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface SitePage {
+  name: string;
+  slug: string;
+  purpose: string;
+}
+
+type BuildStatus = 'pending' | 'building' | 'done' | 'error';
+
+interface PageBuildState extends SitePage {
+  status: BuildStatus;
+  error?: string;
+}
+
+// ── FULL-SITE BUILDER MODAL ───────────────────────────────────────────────────
+const FullSiteBuilderModal = ({
+  isOpen,
+  onClose,
+  onDone,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onDone: (pages: Page[]) => void;
+}) => {
+  const [step, setStep] = useState<'prompt' | 'plan' | 'building' | 'done'>('prompt');
+  const [prompt, setPrompt] = useState('');
+  const [sitePlan, setSitePlan] = useState<SitePage[]>([]);
+  const [buildStates, setBuildStates] = useState<PageBuildState[]>([]);
+  const [isPlanning, setIsPlanning] = useState(false);
+  const [builtPages, setBuiltPages] = useState<Page[]>([]);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setStep('prompt');
+      setPrompt('');
+      setSitePlan([]);
+      setBuildStates([]);
+      setBuiltPages([]);
+      setIsPlanning(false);
+      setTimeout(() => textareaRef.current?.focus(), 100);
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const handlePlan = async () => {
+    if (!prompt.trim()) return;
+    setIsPlanning(true);
+    try {
+      const res = await planSite(prompt.trim());
+      const pages: SitePage[] = res?.data?.pages ?? res?.pages ?? [];
+      if (!pages.length) {
+        toast.error('AI could not plan pages. Please rephrase your prompt.');
+        return;
+      }
+      setSitePlan(pages);
+      setBuildStates(pages.map((p) => ({ ...p, status: 'pending' })));
+      setStep('plan');
+    } catch (e) {
+      toast.error('Failed to plan site. Please try again.');
+    } finally {
+      setIsPlanning(false);
+    }
+  };
+
+  const handleBuild = async () => {
+    setStep('building');
+
+    const createdPages: Page[] = [];
+
+    // Step 1 — create all DB records first (so every page's navbar has all slugs)
+    try {
+      for (const p of sitePlan) {
+        try {
+          const created = await pagesApi.createPage({ name: p.name, slug: p.slug, useHtml: true });
+          createdPages.push(created);
+        } catch (err: any) {
+          if (err?.response?.status === 409) {
+            // Slug conflict — try with a timestamp suffix
+            const altSlug = `${p.slug}-${Date.now().toString().slice(-4)}`;
+            const created = await pagesApi.createPage({ name: p.name, slug: altSlug, useHtml: true });
+            createdPages.push(created);
+            // Patch the plan so slug is correct in nav context
+            p.slug = altSlug;
+          } else {
+            throw err;
+          }
+        }
+      }
+    } catch (err) {
+      toast.error('Failed to create pages in database.');
+      setStep('plan');
+      return;
+    }
+
+    // Refresh build states with corrected slugs
+    setBuildStates(sitePlan.map((p) => ({ ...p, status: 'pending' })));
+
+    // Step 2 — generate HTML for each page sequentially
+    const finalPages: Page[] = [];
+
+    for (let i = 0; i < sitePlan.length; i++) {
+      const p = sitePlan[i];
+      const created = createdPages[i];
+
+      setBuildStates((prev) =>
+        prev.map((s, j) => (j === i ? { ...s, status: 'building' } : s))
+      );
+
+      try {
+        // Build a rich per-page prompt that names all pages
+        const navList = sitePlan.map((sp) => `${sp.name} (/${sp.slug})`).join(', ');
+        const pagePrompt =
+          `Build the "${p.name}" page (slug: /${p.slug}) for the following website: ${prompt}.\n\n` +
+          `PAGE CONTENT: ${p.purpose}\n\n` +
+          `FULL SITE NAVIGATION: ${navList}. ` +
+          `The navbar MUST link to ALL these pages. The current page is "${p.name}" — mark it as active/highlighted in the navbar. ` +
+          `Every CTA or category button that logically leads to another page MUST use the real href (e.g. "Shop Men's" → /mens). ` +
+          `Keep the same color scheme and design system across all pages.`;
+
+        const result = await generatePageHTML(pagePrompt, p.slug);
+        const html: string | undefined = result?.data?.html ?? result?.html;
+
+        if (html) {
+          await pagesApi.updatePage(created._id, {
+            htmlContent: html,
+            useHtml: true,
+            jsonConfig: created.jsonConfig,
+          });
+          finalPages.push({ ...created, htmlContent: html, useHtml: true });
+          setBuildStates((prev) =>
+            prev.map((s, j) => (j === i ? { ...s, status: 'done' } : s))
+          );
+        } else {
+          throw new Error('Empty HTML returned');
+        }
+      } catch (err: any) {
+        setBuildStates((prev) =>
+          prev.map((s, j) =>
+            j === i ? { ...s, status: 'error', error: err.message || 'Generation failed' } : s
+          )
+        );
+      }
+    }
+
+    setBuiltPages(finalPages);
+    setStep('done');
+    onDone(finalPages);
+  };
+
+  const doneCount = buildStates.filter((s) => s.status === 'done').length;
+  const errorCount = buildStates.filter((s) => s.status === 'error').length;
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-black/75 backdrop-blur-xl"
+        onClick={step === 'building' ? undefined : onClose}
+      />
+
+      <div
+        className="relative w-full max-w-2xl bg-[#0f0f0f] border border-white/10 rounded-[2.5rem] shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* ── STEP: PROMPT ── */}
+        {step === 'prompt' && (
+          <>
+            <div className="p-10 pb-6">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-violet-600 flex items-center justify-center shadow-lg">
+                  <Globe className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-3xl font-black text-white tracking-tight">Build Full Website</h3>
+                  <p className="text-white/40 font-medium text-sm">Describe your entire website — AI creates every page</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-10 pb-10 space-y-6">
+              <div className="relative">
+                <textarea
+                  ref={textareaRef}
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handlePlan(); }}
+                  placeholder={
+                    'e.g. Build a fashion e-commerce store with pages for Home, Men\'s Collection, Women\'s Collection, Shoes, and T-Shirts. Each category page should have product grids and a Buy Now button.'
+                  }
+                  rows={5}
+                  className="w-full bg-white/5 border border-white/10 rounded-3xl px-6 py-5 text-white placeholder-white/20 text-base leading-relaxed resize-none outline-none focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/10 transition-all"
+                />
+                <div className="absolute bottom-5 right-6 text-[10px] font-black text-white/20 tracking-widest uppercase">
+                  ⌘ + Enter to plan
+                </div>
+              </div>
+
+              {/* Example prompts */}
+              <div className="space-y-2">
+                <p className="text-[10px] font-black text-white/20 uppercase tracking-widest ml-1">Examples</p>
+                {[
+                  'E-commerce fashion store: Home, Men\'s, Women\'s, Shoes, T-Shirts pages',
+                  'University website: Home, Admissions, Courses, Faculty, Contact pages',
+                  'SaaS startup: Home, Features, Pricing, About, Blog pages',
+                  'Restaurant: Home, Menu, Reservations, About, Contact pages',
+                ].map((ex) => (
+                  <button
+                    key={ex}
+                    onClick={() => setPrompt(ex)}
+                    className="w-full text-left text-xs text-white/40 hover:text-white/80 hover:bg-white/5 px-4 py-3 rounded-2xl border border-white/5 hover:border-white/10 transition flex items-center justify-between group"
+                  >
+                    <span className="truncate">{ex}</span>
+                    <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition shrink-0 ml-2" />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="px-10 py-6 bg-white/[0.02] border-t border-white/5 flex items-center justify-between">
+              <button onClick={onClose} className="text-white/40 hover:text-white text-sm font-bold transition">
+                Cancel
+              </button>
+              <button
+                onClick={handlePlan}
+                disabled={!prompt.trim() || isPlanning}
+                className="flex items-center gap-3 h-14 px-10 rounded-2xl bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black uppercase tracking-widest text-xs transition-all hover:scale-105 shadow-xl"
+              >
+                {isPlanning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                {isPlanning ? 'Planning…' : 'Plan My Site'}
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* ── STEP: PLAN REVIEW ── */}
+        {step === 'plan' && (
+          <>
+            <div className="p-10 pb-6">
+              <div className="flex items-center gap-4 mb-2">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-600/20 flex items-center justify-center">
+                  <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black text-white tracking-tight">Site Plan Ready</h3>
+                  <p className="text-white/40 text-sm font-medium">AI will build {sitePlan.length} pages with connected navigation</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-10 pb-6 space-y-3 max-h-80 overflow-y-auto">
+              {sitePlan.map((p, i) => (
+                <div
+                  key={p.slug}
+                  className="flex items-start gap-4 p-4 rounded-2xl border border-white/10 bg-white/5"
+                >
+                  <div className="w-8 h-8 rounded-xl bg-blue-600/20 flex items-center justify-center text-blue-400 text-xs font-black shrink-0 mt-0.5">
+                    {i + 1}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-3 mb-1">
+                      <span className="text-white font-bold text-sm">{p.name}</span>
+                      <span className="text-[10px] font-mono text-white/30 bg-white/5 px-2 py-0.5 rounded-md">/{p.slug}</span>
+                    </div>
+                    <p className="text-white/40 text-xs leading-relaxed">{p.purpose}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="px-10 py-6 bg-white/[0.02] border-t border-white/5 flex items-center justify-between">
+              <button
+                onClick={() => setStep('prompt')}
+                className="text-white/40 hover:text-white text-sm font-bold transition"
+              >
+                ← Edit Prompt
+              </button>
+              <button
+                onClick={handleBuild}
+                className="flex items-center gap-3 h-14 px-10 rounded-2xl bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 text-white font-black uppercase tracking-widest text-xs transition-all hover:scale-105 shadow-xl"
+              >
+                <Sparkles className="w-4 h-4" />
+                Build All {sitePlan.length} Pages
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* ── STEP: BUILDING ── */}
+        {step === 'building' && (
+          <div className="p-10 space-y-6">
+            <div className="flex items-center gap-4 mb-2">
+              <div className="w-12 h-12 rounded-2xl bg-blue-600/20 flex items-center justify-center">
+                <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
+              </div>
+              <div>
+                <h3 className="text-2xl font-black text-white tracking-tight">Building Your Website…</h3>
+                <p className="text-white/40 text-sm font-medium">
+                  {doneCount} / {buildStates.length} pages complete
+                </p>
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-blue-500 to-violet-500 rounded-full transition-all duration-500"
+                style={{ width: buildStates.length ? `${(doneCount / buildStates.length) * 100}%` : '0%' }}
+              />
+            </div>
+
+            <div className="space-y-3 max-h-80 overflow-y-auto">
+              {buildStates.map((p, i) => (
+                <div
+                  key={p.slug}
+                  className={`flex items-center gap-4 p-4 rounded-2xl border transition-all ${
+                    p.status === 'done'
+                      ? 'border-emerald-500/30 bg-emerald-500/5'
+                      : p.status === 'building'
+                      ? 'border-blue-500/40 bg-blue-500/10'
+                      : p.status === 'error'
+                      ? 'border-red-500/30 bg-red-500/5'
+                      : 'border-white/5 bg-white/[0.02]'
+                  }`}
+                >
+                  <div className="shrink-0">
+                    {p.status === 'done' && <CheckCircle2 className="w-5 h-5 text-emerald-400" />}
+                    {p.status === 'building' && <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />}
+                    {p.status === 'error' && <AlertCircle className="w-5 h-5 text-red-400" />}
+                    {p.status === 'pending' && (
+                      <div className="w-5 h-5 rounded-full border-2 border-white/10 flex items-center justify-center">
+                        <span className="text-[9px] text-white/30 font-black">{i + 1}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className={`font-bold text-sm ${
+                      p.status === 'done' ? 'text-emerald-300'
+                      : p.status === 'building' ? 'text-blue-300'
+                      : p.status === 'error' ? 'text-red-300'
+                      : 'text-white/40'
+                    }`}>
+                      {p.name}
+                    </span>
+                    {p.status === 'building' && (
+                      <p className="text-[10px] text-blue-400/70 font-medium mt-0.5">Generating HTML…</p>
+                    )}
+                    {p.status === 'error' && (
+                      <p className="text-[10px] text-red-400/70 font-medium mt-0.5">{p.error}</p>
+                    )}
+                  </div>
+                  <span className="text-[10px] font-mono text-white/20 shrink-0">/{p.slug}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP: DONE ── */}
+        {step === 'done' && (
+          <>
+            <div className="p-10 space-y-6">
+              <div className="flex items-center gap-4 mb-2">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-600/20 flex items-center justify-center">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black text-white tracking-tight">Website Built!</h3>
+                  <p className="text-white/40 text-sm font-medium">
+                    {doneCount} pages created{errorCount > 0 ? `, ${errorCount} failed` : ''} — all linked together
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {buildStates.map((p) => (
+                  <div
+                    key={p.slug}
+                    className={`flex items-center gap-3 p-3 rounded-xl border ${
+                      p.status === 'done'
+                        ? 'border-emerald-500/20 bg-emerald-500/5'
+                        : 'border-red-500/20 bg-red-500/5'
+                    }`}
+                  >
+                    {p.status === 'done'
+                      ? <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      : <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />}
+                    <span className="text-sm font-bold text-white flex-1">{p.name}</span>
+                    <span className="text-[10px] font-mono text-white/30">/{p.slug}</span>
+                    {p.status === 'done' && (
+                      <a
+                        href={`/${p.slug}`}
+                        className="text-[10px] font-black text-blue-400 hover:text-blue-300 uppercase tracking-widest transition"
+                      >
+                        Preview →
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="px-10 py-6 bg-white/[0.02] border-t border-white/5 flex items-center justify-end gap-4">
+              <button onClick={onClose} className="text-white/40 hover:text-white text-sm font-bold transition">
+                Close
+              </button>
+              {builtPages.length > 0 && (
+                <a
+                  href={`/${builtPages[0]?.slug ?? sitePlan[0]?.slug}`}
+                  className="flex items-center gap-2 h-12 px-8 rounded-2xl bg-gradient-to-r from-blue-600 to-violet-600 text-white font-black uppercase tracking-widest text-xs hover:opacity-90 transition"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Open Home Page
+                </a>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ── NEW SINGLE PAGE MODAL ─────────────────────────────────────────────────────
+const NewPageModal = ({
+  isOpen,
+  onClose,
+  onCreate,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onCreate: (name: string, slug: string, mode: 'canvas' | 'ai') => void;
 }) => {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
@@ -50,13 +479,13 @@ const NewPageModal = ({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-gray-900/60 backdrop-blur-md animate-in fade-in duration-300" onClick={onClose} />
-      
-      <div className="relative bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl border border-gray-100 overflow-hidden animate-in zoom-in-95 duration-300">
+      <div className="absolute inset-0 bg-gray-900/60 backdrop-blur-md" onClick={onClose} />
+
+      <div className="relative bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl border border-gray-100 overflow-hidden">
         <div className="p-8 pb-0 flex justify-between items-start">
           <div>
-            <h2 className="text-3xl font-black text-gray-900 tracking-tight">Create New Experience</h2>
-            <p className="text-gray-500 font-medium">How would you like to build your new page?</p>
+            <h2 className="text-3xl font-black text-gray-900 tracking-tight">Create Single Page</h2>
+            <p className="text-gray-500 font-medium">Add one page to your site</p>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-gray-50 rounded-xl transition-colors">
             <X className="w-6 h-6 text-gray-400" />
@@ -64,25 +493,24 @@ const NewPageModal = ({
         </div>
 
         <div className="p-8 space-y-8">
-          {/* Name & Slug */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-widest text-gray-400 ml-1">Experience Name</label>
-              <input 
+              <label className="text-xs font-black uppercase tracking-widest text-gray-400 ml-1">Page Name</label>
+              <input
                 autoFocus
-                type="text" 
+                type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Computer Science Dept"
+                placeholder="e.g. Men's Collection"
                 className="w-full h-14 px-6 rounded-2xl border-gray-100 bg-gray-50/50 text-gray-900 font-bold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
               />
             </div>
             <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-widest text-gray-400 ml-1">Public Slug</label>
+              <label className="text-xs font-black uppercase tracking-widest text-gray-400 ml-1">URL Slug</label>
               <div className="relative">
                 <span className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400 font-mono text-sm">/</span>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={slug}
                   onChange={(e) => setSlug(e.target.value)}
                   className="w-full h-14 pl-10 pr-6 rounded-2xl border-gray-100 bg-gray-50/50 text-gray-900 font-mono text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
@@ -91,11 +519,10 @@ const NewPageModal = ({
             </div>
           </div>
 
-          {/* Mode Selection */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <button 
+            <button
               onClick={() => setMode('ai')}
-              className={`relative p-8 rounded-[2rem] border-2 text-left transition-all group ${
+              className={`relative p-8 rounded-4xl border-2 text-left transition-all group ${
                 mode === 'ai' ? 'border-blue-600 bg-blue-50/30 ring-4 ring-blue-500/5' : 'border-gray-100 hover:border-blue-200'
               }`}
             >
@@ -104,14 +531,14 @@ const NewPageModal = ({
               }`}>
                 <Wand2 className="w-6 h-6" />
               </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">AI Full Build</h3>
-              <p className="text-gray-500 text-sm leading-relaxed">Describe your campus or department and let AI architect the whole landing page instantly.</p>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">AI Build</h3>
+              <p className="text-gray-500 text-sm leading-relaxed">Describe the page and let AI generate the full HTML instantly.</p>
               {mode === 'ai' && <div className="absolute top-6 right-6 w-3 h-3 bg-blue-600 rounded-full animate-pulse" />}
             </button>
 
-            <button 
+            <button
               onClick={() => setMode('canvas')}
-              className={`relative p-8 rounded-[2rem] border-2 text-left transition-all group ${
+              className={`relative p-8 rounded-4xl border-2 text-left transition-all group ${
                 mode === 'canvas' ? 'border-violet-600 bg-violet-50/30 ring-4 ring-violet-500/5' : 'border-gray-100 hover:border-violet-200'
               }`}
             >
@@ -121,25 +548,22 @@ const NewPageModal = ({
                 <MousePointer2 className="w-6 h-6" />
               </div>
               <h3 className="text-xl font-bold text-gray-900 mb-2">Visual Canvas</h3>
-              <p className="text-gray-500 text-sm leading-relaxed">Start with a blank canvas and drag-and-drop components to build your interface manually.</p>
+              <p className="text-gray-500 text-sm leading-relaxed">Drag-and-drop block editor — build manually.</p>
               {mode === 'canvas' && <div className="absolute top-6 right-6 w-3 h-3 bg-violet-600 rounded-full animate-pulse" />}
             </button>
           </div>
         </div>
 
         <div className="p-8 bg-gray-50/50 flex items-center justify-end gap-4">
-          <button 
-            onClick={onClose}
-            className="px-6 py-3 rounded-xl text-gray-500 font-bold hover:text-gray-900 transition-colors"
-          >
+          <button onClick={onClose} className="px-6 py-3 rounded-xl text-gray-500 font-bold hover:text-gray-900 transition-colors">
             Cancel
           </button>
-          <button 
+          <button
             disabled={!name || !slug}
             onClick={() => onCreate(name, slug, mode)}
             className="h-14 px-10 bg-gray-900 hover:bg-black disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-2xl flex items-center gap-3 shadow-xl transition-all hover:-translate-y-0.5"
           >
-            Assemble Experience
+            Create Page
             <ArrowRight className="w-5 h-5" />
           </button>
         </div>
@@ -148,17 +572,17 @@ const NewPageModal = ({
   );
 };
 
+// ─── DASHBOARD ────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const { user, isLoading, logout } = useAuth();
   const [pages, setPages] = useState<Page[]>([]);
   const [fetchingPages, setFetchingPages] = useState(true);
   const [showNewPageModal, setShowNewPageModal] = useState(false);
+  const [showSiteBuilder, setShowSiteBuilder] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
-    if (!isLoading && !user) {
-      router.push('/login');
-    }
+    if (!isLoading && !user) router.push('/login');
   }, [isLoading, user, router]);
 
   useEffect(() => {
@@ -172,49 +596,45 @@ export default function DashboardPage() {
         setFetchingPages(false);
       }
     };
-
-    if (user) {
-      fetchPages();
-    }
+    if (user) fetchPages();
   }, [user]);
 
   const handleCreatePage = async (name: string, slug: string, mode: 'canvas' | 'ai') => {
     try {
-      // For Canvas mode, we set useHtml = false
-      // For AI mode, we'll initialize it and then probably trigger generation in the editor
-      // or we can allow the user to decide later.
-      // But based on the request, 'End to end' should go to AI builder.
-      const newPage = await pagesApi.createPage({ 
-        name, 
-        slug, 
-        useHtml: mode === 'ai' 
-      });
+      const newPage = await pagesApi.createPage({ name, slug, useHtml: mode === 'ai' });
       setPages([...pages, newPage]);
-      toast.success('Page created successfully');
+      toast.success('Page created!');
       setShowNewPageModal(false);
-      
-      // Navigate to editor with mode as a param to trigger prompt automatically
-      const targetUrl = mode === 'ai' 
-        ? `/edit/${slug}?init=ai` 
-        : `/edit/${slug}`;
-      router.push(targetUrl);
+      router.push(mode === 'ai' ? `/edit/${slug}?init=ai` : `/edit/${slug}`);
     } catch (error: any) {
-      console.error('Failed to create page:', error);
       if (error.response?.status === 409) {
-        toast.error('A page with this slug already exists. Please try a different slug.');
+        toast.error('A page with this slug already exists.');
       } else {
-        toast.error('Failed to create page. Please try again.');
+        toast.error('Failed to create page.');
       }
     }
+  };
+
+  const handleSiteDone = async (newPages: Page[]) => {
+    // Refresh page list from DB
+    try {
+      const data = await pagesApi.getAllPages();
+      setPages(data);
+    } catch {
+      setPages((prev) => [...prev, ...newPages]);
+    }
+    toast.success(`${newPages.length} pages built successfully!`);
   };
 
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
       </div>
     );
   }
+
+  const canEdit = user?.role === 'admin' || user?.role === 'super-admin' || user?.role === 'editor';
 
   return (
     <div className="min-h-screen bg-gray-50/50 flex flex-col">
@@ -226,7 +646,9 @@ export default function DashboardPage() {
               <div className="w-9 h-9 bg-blue-600 rounded-lg flex items-center justify-center text-white">
                 <Bot className="w-5 h-5" />
               </div>
-              <span className="text-lg font-black tracking-tight text-gray-900 uppercase">Campus<span className="text-blue-600">Sync</span></span>
+              <span className="text-lg font-black tracking-tight text-gray-900 uppercase">
+                Campus<span className="text-blue-600">Sync</span>
+              </span>
             </div>
 
             <div className="flex items-center gap-6">
@@ -235,11 +657,7 @@ export default function DashboardPage() {
                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{user?.role}</span>
               </div>
               <div className="h-8 w-px bg-gray-100" />
-              <button
-                onClick={() => logout()}
-                className="p-2 text-gray-400 hover:text-red-500 transition-colors"
-                title="Logout"
-              >
+              <button onClick={() => logout()} className="p-2 text-gray-400 hover:text-red-500 transition-colors" title="Logout">
                 <LogOut className="w-5 h-5" />
               </button>
             </div>
@@ -248,38 +666,47 @@ export default function DashboardPage() {
       </nav>
 
       <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 w-full">
-        {/* Dashboard Title & Action */}
+        {/* Title & Actions */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
           <div>
-            <h1 className="text-3xl font-black text-gray-900 tracking-tight">Ecosystem Overview</h1>
-            <p className="text-gray-500 font-medium">Manage your institutional pages and dynamic interfaces.</p>
+            <h1 className="text-3xl font-black text-gray-900 tracking-tight">Dashboard</h1>
+            <p className="text-gray-500 font-medium">Build and manage your AI-powered website.</p>
           </div>
-          {(user?.role === 'admin' || user?.role === 'super-admin' || user?.role === 'editor') && (
-            <Button
-              onClick={() => setShowNewPageModal(true)}
-              className="rounded-2xl h-14 px-8 bg-gray-900 hover:bg-black text-white font-bold flex items-center gap-2 shadow-xl shadow-gray-200 transition-all hover:-translate-y-0.5"
-            >
-              <Plus className="w-5 h-5" />
-              Build New Experience
-            </Button>
+          {canEdit && (
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={() => setShowNewPageModal(true)}
+                className="rounded-2xl h-12 px-6 bg-white border border-gray-200 text-gray-900 font-bold flex items-center gap-2 hover:bg-gray-50 shadow-sm transition-all"
+              >
+                <Plus className="w-4 h-4" />
+                Single Page
+              </Button>
+              <button
+                onClick={() => setShowSiteBuilder(true)}
+                className="rounded-2xl h-12 px-6 bg-gradient-to-r from-blue-600 to-violet-600 hover:opacity-90 text-white font-bold flex items-center gap-2 shadow-xl transition-all hover:-translate-y-0.5"
+              >
+                <Globe className="w-4 h-4" />
+                Build Full Website
+              </button>
+            </div>
           )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          {/* Stats Column */}
+          {/* Stats */}
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-3xl border border-gray-100 shadow-xs">
               <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xs font-black uppercase tracking-widest text-gray-400">Node Status</h3>
+                <h3 className="text-xs font-black uppercase tracking-widest text-gray-400">Status</h3>
                 <Activity className="w-4 h-4 text-green-500" />
               </div>
               <div className="space-y-4">
                 <div className="p-4 bg-gray-50 rounded-2xl">
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Live Pages</p>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total Pages</p>
                   <p className="text-2xl font-black text-gray-900">{pages.length}</p>
                 </div>
                 <div className="p-4 bg-gray-50 rounded-2xl">
-                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Security Level</p>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Security</p>
                   <p className="text-sm font-bold text-blue-600 flex items-center gap-2">
                     <Shield className="w-3.5 h-3.5" /> High / Encrypted
                   </p>
@@ -287,27 +714,30 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <div className="bg-linear-to-br from-blue-600 to-indigo-700 p-8 rounded-[2.5rem] shadow-2xl text-white relative overflow-hidden group">
+            {/* AI Site Builder Card */}
+            <div className="bg-gradient-to-br from-blue-600 to-violet-700 p-8 rounded-[2.5rem] shadow-2xl text-white relative overflow-hidden group">
               <div className="relative z-10">
-                <Sparkles className="w-10 h-10 text-white/30 mb-6" />
-                <h3 className="text-xl font-bold mb-2">AI Architect</h3>
-                <p className="text-blue-100/80 text-sm leading-relaxed mb-8">Ready to evolve your digital presence? Summon the AI architect to build something new.</p>
-                <button 
-                  onClick={() => setShowNewPageModal(true)}
+                <Globe className="w-10 h-10 text-white/30 mb-6" />
+                <h3 className="text-xl font-bold mb-2">Full Website Builder</h3>
+                <p className="text-blue-100/80 text-sm leading-relaxed mb-8">
+                  Describe your entire website in one prompt. AI builds every page with working navigation.
+                </p>
+                <button
+                  onClick={() => setShowSiteBuilder(true)}
                   className="w-full bg-white text-blue-600 font-bold py-4 rounded-2xl shadow-xl hover:bg-blue-50 transition-colors"
                 >
-                  Start AI Design Session
+                  ✦ Build Full Site with AI
                 </button>
               </div>
               <div className="absolute top-0 right-0 -translate-y-4 translate-x-4 w-32 h-32 bg-white/10 rounded-full blur-2xl group-hover:scale-150 transition-transform duration-1000" />
             </div>
           </div>
 
-          {/* Main List Column */}
+          {/* Pages List */}
           <div className="lg:col-span-3">
             <div className="bg-white rounded-[2.5rem] border border-gray-100 shadow-xs overflow-hidden">
               <div className="p-8 border-b border-gray-50 bg-gray-50/30 flex items-center justify-between">
-                <h2 className="text-lg font-black text-gray-900 uppercase tracking-widest">Active Experiences</h2>
+                <h2 className="text-lg font-black text-gray-900 uppercase tracking-widest">All Pages</h2>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <input
@@ -336,27 +766,30 @@ export default function DashboardPage() {
                           <div>
                             <h3 className="text-xl font-bold text-gray-900 mb-1">{page.name}</h3>
                             <div className="flex items-center gap-3">
-                              <span className="px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-black uppercase tracking-widest rounded-md ring-1 ring-green-200">Live</span>
-                              <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">{page.useHtml ? 'AI Full Build' : 'Visual Canvas'}</span>
-                              <span className="text-xs font-mono text-gray-400 tracking-tighter hover:text-blue-600 cursor-pointer transition-colors">/{page.slug}</span>
+                              <span className="px-2 py-0.5 bg-green-100 text-green-700 text-[10px] font-black uppercase tracking-widest rounded-md ring-1 ring-green-200">
+                                Live
+                              </span>
+                              <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">
+                                {page.useHtml ? 'AI Build' : 'Visual Canvas'}
+                              </span>
+                              <span className="text-xs font-mono text-gray-400">/{page.slug}</span>
                             </div>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-3">
-                          {(user?.role === 'admin' || user?.role === 'super-admin' || user?.role === 'editor') && (
+                          {canEdit && (
                             <Link
                               href={`/edit/${page.slug}`}
                               className="h-12 px-6 rounded-xl bg-white border border-gray-100 text-gray-900 text-sm font-bold flex items-center gap-2 hover:bg-gray-50 hover:shadow-sm transition-all shadow-xs"
                             >
                               <FileEdit className="w-4 h-4 text-blue-600" />
-                              Configure UI
+                              Edit
                             </Link>
                           )}
                           <Link
                             href={`/${page.slug}`}
                             className="h-12 px-5 rounded-xl bg-blue-600 hover:bg-blue-700 flex items-center gap-2 text-white text-sm font-bold transition-all shadow-sm hover:shadow-blue-200 hover:-translate-y-0.5"
-                            title="Play / Preview"
                           >
                             <ExternalLink className="w-4 h-4" />
                             Play
@@ -370,10 +803,15 @@ export default function DashboardPage() {
                   ))
                 ) : (
                   <div className="p-20 text-center">
-                    <Layout className="w-12 h-12 text-gray-100 mx-auto mb-6" />
-                    <h3 className="text-xl font-black text-gray-900 mb-2">No experiences yet.</h3>
-                    <p className="text-gray-400 font-medium mb-10">Your digital campus is a blank canvas. Start building now.</p>
-                    <Button onClick={() => setShowNewPageModal(true)} className="rounded-2xl h-14 px-10">Start First Build</Button>
+                    <Globe className="w-12 h-12 text-gray-100 mx-auto mb-6" />
+                    <h3 className="text-xl font-black text-gray-900 mb-2">No pages yet.</h3>
+                    <p className="text-gray-400 font-medium mb-10">Build your first website with a single prompt.</p>
+                    <button
+                      onClick={() => setShowSiteBuilder(true)}
+                      className="h-14 px-10 rounded-2xl bg-gradient-to-r from-blue-600 to-violet-600 text-white font-bold shadow-xl"
+                    >
+                      ✦ Build Full Website
+                    </button>
                   </div>
                 )}
               </div>
@@ -382,10 +820,16 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      <NewPageModal 
-        isOpen={showNewPageModal} 
+      <NewPageModal
+        isOpen={showNewPageModal}
         onClose={() => setShowNewPageModal(false)}
         onCreate={handleCreatePage}
+      />
+
+      <FullSiteBuilderModal
+        isOpen={showSiteBuilder}
+        onClose={() => setShowSiteBuilder(false)}
+        onDone={handleSiteDone}
       />
     </div>
   );
